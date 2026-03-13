@@ -33,7 +33,7 @@
             <p class="text-red-700 text-sm font-bold mb-4 flex items-center gap-2">
                 <i class="fas fa-exclamation-triangle"></i> Accés denegat
             </p>
-            <p id="error-details" class="text-xs text-red-600 mb-6 leading-relaxed">No tens permisos per entrar.</p>
+            <p id="error-details" class="text-xs text-red-600 mb-6 leading-relaxed">No s'ha pogut verificar la teva identitat.</p>
             <button onclick="location.reload()" class="w-full bg-red-600 text-white py-3 rounded-xl font-bold text-xs hover:bg-red-700 transition-colors shadow-md">Tornar a provar</button>
         </div>
     </div>
@@ -159,13 +159,14 @@
                         user = u; 
                         await loadBaseData(); 
                     } else {
+                        // Si no hi ha usuari, amaguem l'overlay de càrrega i mostrem el login
                         document.getElementById('loading-overlay').classList.add('hidden');
                         document.getElementById('login-view').classList.remove('hidden');
                         document.getElementById('main-app').classList.add('hidden');
                     }
                 });
             } catch (e) {
-                showSetupError("Error de connexió amb Firebase.");
+                showSetupError("Error de connexió inicial amb la plataforma.");
             }
         }
 
@@ -174,18 +175,25 @@
             const provider = new GoogleAuthProvider();
             provider.setCustomParameters({ hd: 'xtec.cat' }); // Suggerir compte xtec
             try {
+                // Mostrem l'overlay de càrrega mentre s'obra el popup
+                document.getElementById('login-view').classList.add('hidden');
+                document.getElementById('loading-overlay').classList.remove('hidden');
+                document.getElementById('loading-text').innerText = "Iniciant sessió amb Google...";
+                
                 await signInWithPopup(auth, provider);
             } catch (err) {
                 console.error("Auth Error:", err);
+                document.getElementById('loading-overlay').classList.add('hidden');
+                document.getElementById('login-view').classList.remove('hidden');
                 const errEl = document.getElementById('login-error-msg');
-                errEl.innerText = "Error en l'inici de sessió. Torna-ho a provar.";
+                errEl.innerText = "No s'ha pogut completar el login. Verifica el teu compte.";
                 errEl.classList.remove('hidden');
             }
         };
 
         async function loadBaseData() {
             document.getElementById('loading-overlay').classList.remove('hidden');
-            document.getElementById('loading-text').innerText = "Verificant permisos...";
+            document.getElementById('loading-text').innerText = "Verificant permisos al sistema...";
             
             try {
                 const [c, p, a] = await Promise.all([
@@ -207,11 +215,12 @@
                     setupUI();
                 } else {
                     // Si el correu de Google no està a la llista de professionals
+                    const emailFailed = userEmail;
                     await signOut(auth);
-                    showSetupError(`El compte ${userEmail} no està autoritzat a la llista de professionals.`);
+                    showSetupError(`Accés denegat: El compte ${emailFailed} no figura a la llista de professionals autoritzats.`);
                 }
             } catch (e) { 
-                showSetupError("Error al carregar les dades de Google Sheets."); 
+                showSetupError("Error en la comunicació amb la base de dades (Google Sheets)."); 
             }
         }
 
@@ -235,7 +244,7 @@
                     <i class="fas fa-chevron-right text-gray-200"></i>
                 </div>
             `).join('');
-            if (list.length === 0) container.innerHTML = '<p class="text-center text-gray-400 py-10">Cap centre disponible.</p>';
+            if (list.length === 0) container.innerHTML = '<p class="text-center text-gray-400 py-10">Cap centre disponible per al teu perfil.</p>';
         }
 
         window.openCentre = (id) => {
@@ -266,8 +275,8 @@
                         </div>
                         <p class="text-gray-800 whitespace-pre-wrap leading-relaxed">${l.text}</p>
                     </div>
-                `).join('') : '<p class="text-center text-gray-300 py-6 italic">Sense visites.</p>';
-            }, (err) => showToast("Error de permisos a la base de dades."));
+                `).join('') : '<p class="text-center text-gray-300 py-6 italic">Sense visites registrades encara.</p>';
+            }, (err) => showToast("Error de permisos: No s'ha pogut llegir l'historial."));
         }
 
         document.getElementById('intervention-form').onsubmit = async (e) => {
@@ -279,8 +288,8 @@
                     text: document.getElementById('input-text').value, userName: userData.nom, team: userData.equip,
                     userId: user.uid, createdAt: serverTimestamp()
                 });
-                document.getElementById('input-text').value = ""; changeView('detail'); showToast("Visita guardada!");
-            } catch (e) { showToast("Error al guardar."); } finally { btn.disabled = false; }
+                document.getElementById('input-text').value = ""; changeView('detail'); showToast("Visita guardada correctament!");
+            } catch (e) { showToast("Error al guardar la intervenció."); } finally { btn.disabled = false; }
         };
 
         window.changeView = (v) => {
@@ -314,7 +323,10 @@
         }
 
         document.getElementById('search-input').oninput = (e) => renderCentres(e.target.value);
-        document.getElementById('btn-logout').onclick = async () => { await signOut(auth); location.reload(); };
+        document.getElementById('btn-logout').onclick = async () => { 
+            await signOut(auth); 
+            location.reload(); 
+        };
 
         window.onload = init;
     </script>
