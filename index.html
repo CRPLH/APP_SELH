@@ -28,11 +28,13 @@
     <!-- Pantalla de càrrega -->
     <div id="loading-overlay" class="fixed inset-0 bg-white z-[100] flex flex-col items-center justify-center transition-opacity duration-500">
         <div id="spinner" class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12 mb-4"></div>
-        <p id="loading-text" class="text-indigo-600 font-bold leading-relaxed text-center px-6">Sincronitzant dades...</p>
-        <div id="setup-instructions" class="hidden mt-6 p-6 bg-red-50 rounded-3xl border border-red-100 max-w-sm mx-auto">
-            <p class="text-red-700 text-sm font-bold mb-4">⚠️ Error de connexió</p>
-            <p id="error-details" class="text-xs text-red-600 mb-4">L'app no s'ha pogut connectar correctament. Revisa que hagis activat "Anonymous Sign-in" a la consola de Firebase.</p>
-            <button onclick="location.reload()" class="text-xs bg-red-100 text-red-700 px-4 py-2 rounded-lg font-bold">Tornar a provar</button>
+        <p id="loading-text" class="text-indigo-600 font-bold leading-relaxed text-center px-6">Validant identitat...</p>
+        <div id="setup-instructions" class="hidden mt-6 p-6 bg-red-50 rounded-3xl border border-red-100 max-w-sm mx-auto shadow-xl">
+            <p class="text-red-700 text-sm font-bold mb-4 flex items-center gap-2">
+                <i class="fas fa-exclamation-triangle"></i> Accés denegat
+            </p>
+            <p id="error-details" class="text-xs text-red-600 mb-6 leading-relaxed">No tens permisos per entrar.</p>
+            <button onclick="location.reload()" class="w-full bg-red-600 text-white py-3 rounded-xl font-bold text-xs hover:bg-red-700 transition-colors shadow-md">Tornar a provar</button>
         </div>
     </div>
 
@@ -43,9 +45,13 @@
                 <i class="fas fa-user-shield text-white text-3xl"></i>
             </div>
             <h1 class="text-3xl font-black text-gray-800 mb-2">SE L'Hospitalet</h1>
-            <p class="text-gray-500 mb-10 text-sm">Entra amb el teu correu @xtec.cat</p>
-            <input type="email" id="login-email" placeholder="usuari@xtec.cat" class="w-full p-4 mb-4 border border-gray-200 rounded-2xl text-center outline-none focus:ring-2 focus:ring-indigo-500">
-            <button id="btn-login-action" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-5 rounded-2xl transition-all shadow-lg active:scale-95">Accedir</button>
+            <p class="text-gray-500 mb-10 text-sm">Identifica't amb el teu compte corporatiu per continuar.</p>
+            
+            <button id="btn-login-google" class="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-bold py-4 rounded-2xl transition-all shadow-sm active:scale-95">
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-6 h-6" alt="Google">
+                Entra amb Google
+            </button>
+            <p id="login-error-msg" class="text-red-500 text-xs font-bold mt-4 hidden"></p>
         </div>
     </div>
 
@@ -65,14 +71,16 @@
                             <p id="user-display-team" class="text-[9px] text-gray-400 font-bold uppercase mt-0.5 tracking-wider">...</p>
                         </div>
                     </div>
-                    <button id="btn-logout" class="p-2 text-gray-300 hover:text-red-500"><i class="fas fa-power-off"></i></button>
+                    <button id="btn-logout" class="p-2 text-gray-300 hover:text-red-500 transition-colors"><i class="fas fa-power-off"></i></button>
                 </div>
             </div>
         </header>
 
         <main class="flex-1 p-4 sm:p-8 max-w-4xl mx-auto w-full">
             <div id="view-list" class="slide-up space-y-6">
-                <h2 class="text-3xl font-black text-gray-800">Centres</h2>
+                <div class="flex items-center justify-between">
+                    <h2 class="text-3xl font-black text-gray-800">Centres</h2>
+                </div>
                 <div class="relative group w-full">
                     <i class="fas fa-search absolute left-5 top-1/2 -translate-y-1/2 text-gray-300"></i>
                     <input type="text" id="search-input" placeholder="Cerca centre..." class="w-full pl-14 pr-6 py-5 bg-white border border-gray-200 rounded-3xl shadow-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all text-lg">
@@ -93,13 +101,20 @@
 
             <div id="view-form" class="hidden slide-up max-w-2xl mx-auto">
                 <form id="intervention-form" class="bg-white p-8 rounded-[2.5rem] shadow-2xl border border-gray-100">
-                    <h2 class="text-2xl font-black text-gray-800 mb-8">Nova Visita</h2>
-                    <div id="form-nom-display" class="p-5 bg-indigo-50 rounded-2xl font-black text-indigo-900 mb-6 italic border border-indigo-100">Centre...</div>
-                    <label class="block text-[10px] font-bold text-gray-400 uppercase mb-2 ml-2">Data</label>
-                    <input type="date" id="input-date" required class="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl mb-6 font-bold">
-                    <label class="block text-[10px] font-bold text-gray-400 uppercase mb-2 ml-2">Resum de l'actuació</label>
-                    <textarea id="input-text" rows="6" required class="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl mb-6 outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Escriu aquí..."></textarea>
-                    <button type="submit" id="btn-save" class="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl hover:bg-indigo-700 transition-all">Guardar Visita</button>
+                    <h2 class="text-2xl font-black text-gray-800 mb-8 text-center">Nova Visita</h2>
+                    <div id="form-nom-display" class="p-5 bg-indigo-50 rounded-2xl font-black text-indigo-900 mb-6 italic border border-indigo-100 text-center">Centre...</div>
+                    <div class="space-y-1 mb-6">
+                        <label class="block text-[10px] font-bold text-gray-400 uppercase ml-2">Data</label>
+                        <input type="date" id="input-date" required class="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl font-bold outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div class="space-y-1 mb-6">
+                        <label class="block text-[10px] font-bold text-gray-400 uppercase ml-2">Resum de l'actuació</label>
+                        <textarea id="input-text" rows="6" required class="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Escriu aquí..."></textarea>
+                    </div>
+                    <div class="flex gap-4">
+                        <button type="button" onclick="changeView('detail')" class="flex-1 bg-gray-100 text-gray-600 font-bold py-5 rounded-2xl">Cancel·lar</button>
+                        <button type="submit" id="btn-save" class="flex-[2] bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl hover:bg-indigo-700 transition-all">Guardar Visita</button>
+                    </div>
                 </form>
             </div>
         </main>
@@ -111,11 +126,11 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ======================================================
-        // CONFIGURACIÓ DE FIREBASE ACTUALITZADA
+        // CONFIGURACIÓ DE FIREBASE
         // ======================================================
         const firebaseConfig = {
             apiKey: "AIzaSyDQhcANb5YLX7AUS0xkA1d2ClOjC42JFo8",
@@ -125,7 +140,6 @@
             messagingSenderId: "35717844423",
             appId: "1:35717844423:web:49611d7a7a7f3be2469de2"
         };
-        // ======================================================
 
         const appId = 'selh-hospitalet-v2-prod';
         let db, auth, user, userData;
@@ -145,77 +159,61 @@
                         user = u; 
                         await loadBaseData(); 
                     } else {
-                        try {
-                            await signInAnonymously(auth);
-                        } catch (err) {
-                            console.error("Auth Error:", err);
-                            showSetupError("Error d'autenticació: Verifica que hagis activat 'Anonymous Sign-in' a Firebase Authentication.");
-                        }
+                        document.getElementById('loading-overlay').classList.add('hidden');
+                        document.getElementById('login-view').classList.remove('hidden');
+                        document.getElementById('main-app').classList.add('hidden');
                     }
                 });
             } catch (e) {
-                console.error("Init Error:", e);
-                showSetupError("Error de configuració de Firebase. Revisa les claus.");
+                showSetupError("Error de connexió amb Firebase.");
             }
         }
 
-        function showSetupError(msg) {
-            document.getElementById('spinner').style.display = 'none';
-            document.getElementById('loading-text').style.display = 'none';
-            document.getElementById('error-details').innerText = msg;
-            document.getElementById('setup-instructions').classList.remove('hidden');
-        }
+        // --- LOGIN AMB GOOGLE ---
+        document.getElementById('btn-login-google').onclick = async () => {
+            const provider = new GoogleAuthProvider();
+            provider.setCustomParameters({ hd: 'xtec.cat' }); // Suggerir compte xtec
+            try {
+                await signInWithPopup(auth, provider);
+            } catch (err) {
+                console.error("Auth Error:", err);
+                const errEl = document.getElementById('login-error-msg');
+                errEl.innerText = "Error en l'inici de sessió. Torna-ho a provar.";
+                errEl.classList.remove('hidden');
+            }
+        };
 
         async function loadBaseData() {
+            document.getElementById('loading-overlay').classList.remove('hidden');
+            document.getElementById('loading-text').innerText = "Verificant permisos...";
+            
             try {
                 const [c, p, a] = await Promise.all([
                     fetchSheet(GIDS.CENTRES), fetchSheet(GIDS.PROFESSIONALS), fetchSheet(GIDS.ASSIGNACIONS)
                 ]);
                 allCentres = c; professionals = p; assignacions = a;
-                checkLogin();
+                
+                const userEmail = user.email?.toLowerCase().trim();
+                const found = professionals.find(p => p.Correu?.toLowerCase().trim() === userEmail);
+                
+                if (found) {
+                    userData = { 
+                        nom: found.Nom, 
+                        email: userEmail, 
+                        equip: (found.Equip || 'EAP').toLowerCase(), 
+                        role: (found.Rol || 'usuari').toLowerCase(), 
+                        assigned: assignacions.filter(a => a.CorreuProfessional?.toLowerCase().trim() === userEmail).map(a => a.CodiCentre) 
+                    };
+                    setupUI();
+                } else {
+                    // Si el correu de Google no està a la llista de professionals
+                    await signOut(auth);
+                    showSetupError(`El compte ${userEmail} no està autoritzat a la llista de professionals.`);
+                }
             } catch (e) { 
-                console.error("Sheets Error:", e);
-                document.getElementById('loading-text').innerText = "Error de connexió Google Sheets. Revisa la publicació del document."; 
+                showSetupError("Error al carregar les dades de Google Sheets."); 
             }
         }
-
-        async function fetchSheet(gid) {
-            const r = await fetch(`${BASE_PUB_URL}&gid=${gid}&t=${Date.now()}`);
-            if (!r.ok) throw new Error("Fetch failed");
-            const t = await r.text();
-            const lines = t.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
-            const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
-            return lines.slice(1).map(line => {
-                const values = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.trim().replace(/^"|"$/g, ''));
-                return headers.reduce((obj, h, i) => (obj[h] = values[i] || "", obj), {});
-            });
-        }
-
-        function checkLogin() {
-            const email = localStorage.getItem('selh_user_email')?.toLowerCase().trim();
-            const found = professionals.find(p => p.Correu?.toLowerCase().trim() === email);
-            if (found) {
-                userData = { 
-                    nom: found.Nom, 
-                    email: found.Correu, 
-                    equip: (found.Equip || 'EAP').toLowerCase(), 
-                    role: (found.Rol || 'usuari').toLowerCase(), 
-                    assigned: assignacions.filter(a => a.CorreuProfessional?.toLowerCase().trim() === email).map(a => a.CodiCentre) 
-                };
-                setupUI();
-            } else {
-                document.getElementById('loading-overlay').classList.add('hidden');
-                document.getElementById('login-view').classList.remove('hidden');
-            }
-        }
-
-        document.getElementById('btn-login-action').onclick = () => {
-            const email = document.getElementById('login-email').value.trim();
-            if (email) { 
-                localStorage.setItem('selh_user_email', email); 
-                checkLogin(); 
-            }
-        };
 
         function setupUI() {
             document.getElementById('loading-overlay').classList.add('hidden');
@@ -237,13 +235,14 @@
                     <i class="fas fa-chevron-right text-gray-200"></i>
                 </div>
             `).join('');
+            if (list.length === 0) container.innerHTML = '<p class="text-center text-gray-400 py-10">Cap centre disponible.</p>';
         }
 
         window.openCentre = (id) => {
             selectedCentre = allCentres.find(c => c.Codi === id);
             document.getElementById('detail-content').innerHTML = `
                 <h1 class="text-3xl font-black text-gray-900 mb-6">${selectedCentre.Nom}</h1>
-                <button onclick="changeView('form')" class="bg-indigo-600 text-white font-bold py-4 px-8 rounded-2xl w-full md:w-auto mb-6 shadow-lg">
+                <button onclick="changeView('form')" class="bg-indigo-600 text-white font-bold py-4 px-8 rounded-2xl w-full md:w-auto mb-6 shadow-lg hover:bg-indigo-700 transition-colors">
                     <i class="fas fa-plus mr-2"></i>Nova Intervenció
                 </button>`;
             document.getElementById('form-nom-display').innerText = selectedCentre.Nom;
@@ -254,11 +253,13 @@
 
         function loadHistory(centreId) {
             const container = document.getElementById('history-container');
+            container.innerHTML = '<div class="flex justify-center py-6"><div class="loader rounded-full border-2 border-t-2 h-6 w-6"></div></div>';
+            
             const q = collection(db, 'artifacts', appId, 'public', 'data', 'intervencions');
             onSnapshot(q, (snap) => {
                 const logs = snap.docs.map(d => d.data()).filter(l => l.centreId === centreId).sort((a,b) => b.date.localeCompare(a.date));
                 container.innerHTML = logs.length ? logs.map(l => `
-                    <div class="bg-gray-50 p-6 rounded-3xl border-l-4 team-${l.team.toLowerCase()}">
+                    <div class="bg-gray-50 p-6 rounded-3xl border-l-4 team-${l.team.toLowerCase()} slide-up mb-4">
                         <div class="flex justify-between text-[10px] font-bold text-gray-400 mb-2">
                             <span>${l.date}</span>
                             <span>${l.userName}</span>
@@ -266,10 +267,7 @@
                         <p class="text-gray-800 whitespace-pre-wrap leading-relaxed">${l.text}</p>
                     </div>
                 `).join('') : '<p class="text-center text-gray-300 py-6 italic">Sense visites.</p>';
-            }, (err) => {
-                console.error("Firestore error:", err);
-                showToast("Error de permisos. Revisa les regles de Firestore.");
-            });
+            }, (err) => showToast("Error de permisos a la base de dades."));
         }
 
         document.getElementById('intervention-form').onsubmit = async (e) => {
@@ -281,11 +279,8 @@
                     text: document.getElementById('input-text').value, userName: userData.nom, team: userData.equip,
                     userId: user.uid, createdAt: serverTimestamp()
                 });
-                document.getElementById('input-text').value = ""; changeView('detail'); showToast("Sincronitzat!");
-            } catch (e) { 
-                console.error("Save error:", e);
-                showToast("Error al guardar."); 
-            } finally { btn.disabled = false; }
+                document.getElementById('input-text').value = ""; changeView('detail'); showToast("Visita guardada!");
+            } catch (e) { showToast("Error al guardar."); } finally { btn.disabled = false; }
         };
 
         window.changeView = (v) => {
@@ -294,13 +289,32 @@
             window.scrollTo(0,0);
         };
 
+        async function fetchSheet(gid) {
+            const r = await fetch(`${BASE_PUB_URL}&gid=${gid}&t=${Date.now()}`);
+            const t = await r.text();
+            const lines = t.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
+            const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+            return lines.slice(1).map(line => {
+                const values = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.trim().replace(/^"|"$/g, ''));
+                return headers.reduce((obj, h, i) => (obj[h] = values[i] || "", obj), {});
+            });
+        }
+
+        function showSetupError(msg) {
+            document.getElementById('loading-overlay').classList.remove('hidden');
+            document.getElementById('spinner').style.display = 'none';
+            document.getElementById('loading-text').style.display = 'none';
+            document.getElementById('error-details').innerText = msg;
+            document.getElementById('setup-instructions').classList.remove('hidden');
+        }
+
         function showToast(m) {
             const t = document.getElementById('toast'); document.getElementById('toast-msg').innerText = m;
-            t.classList.remove('opacity-0'); setTimeout(() => t.classList.add('opacity-0'), 2000);
+            t.classList.remove('opacity-0'); setTimeout(() => t.classList.add('opacity-0'), 2500);
         }
 
         document.getElementById('search-input').oninput = (e) => renderCentres(e.target.value);
-        document.getElementById('btn-logout').onclick = () => { localStorage.clear(); location.reload(); };
+        document.getElementById('btn-logout').onclick = async () => { await signOut(auth); location.reload(); };
 
         window.onload = init;
     </script>
