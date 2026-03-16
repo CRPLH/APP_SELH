@@ -163,7 +163,7 @@
         const appId = 'selh-hospitalet-v2-prod';
         let db, auth, user, userData;
         let allCentres = [], professionals = [], assignacions = [], selectedCentre;
-        let intervencionsCounts = {}; // Per guardar el nombre d'intervencions per centre
+        let intervencionsCounts = {}; 
         let isSimulation = false;
         let currentUnsubscribe = null;
         let globalUnsubscribeIntervencions = null;
@@ -265,7 +265,6 @@
                         assigned: assignacions.filter(a => a.CorreuProfessional?.toLowerCase().trim() === userEmail).map(a => a.CodiCentre) 
                     };
                     
-                    // Comencem a escoltar el comptador d'intervencions abans de mostrar la UI
                     listenIntervencionsCounts();
                     setupUI();
                 } else {
@@ -278,7 +277,6 @@
             }
         }
 
-        // Funció per escoltar totes les intervencions i comptar-les per centre
         function listenIntervencionsCounts() {
             if (globalUnsubscribeIntervencions) globalUnsubscribeIntervencions();
             
@@ -348,7 +346,7 @@
 
         function loadHistory(centreId) {
             const container = document.getElementById('history-container');
-            container.innerHTML = '<div class="flex justify-center py-10"><div class="loader rounded-full border-2 border-t-2 h-8 w-8"></div></div>';
+            container.innerHTML = '<div id="history-loader" class="flex justify-center py-10"><div class="loader rounded-full border-2 border-t-2 h-8 w-8"></div></div>';
             
             if (currentUnsubscribe) currentUnsubscribe();
 
@@ -411,6 +409,7 @@
                 
                 document.getElementById('input-text').value = "";
                 showToast("Visita guardada!");
+                // Corregit: Redirigim a la vista de detall immediatament després d'èxit
                 changeView('detail');
                 
             } catch (e) { 
