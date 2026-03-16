@@ -31,7 +31,7 @@
     <!-- Pantalla de càrrega -->
     <div id="loading-overlay" class="fixed inset-0 bg-white z-[100] flex flex-col items-center justify-center transition-opacity duration-500">
         <div id="spinner" class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12 mb-4"></div>
-        <p id="loading-text" class="text-indigo-600 font-bold leading-relaxed text-center px-6">Carregant aplicació...</p>
+        <p id="loading-text" class="text-indigo-600 font-bold leading-relaxed text-center px-6">Iniciant sessió segura...</p>
         <div id="setup-instructions" class="hidden mt-6 p-6 bg-red-50 rounded-3xl border border-red-100 max-w-sm mx-auto shadow-xl">
             <p class="text-red-700 text-sm font-bold mb-4 flex items-center gap-2">
                 <i class="fas fa-exclamation-triangle"></i> Error d'accés
@@ -55,7 +55,6 @@
                 Entra amb Google
             </button>
 
-            <!-- Accions de desenvolupador -->
             <div id="dev-actions" class="hidden border-t border-dashed border-gray-200 pt-6 space-y-4">
                 <p class="text-[10px] text-amber-600 font-black uppercase tracking-widest text-center">Eines de Prova</p>
                 <div class="space-y-2">
@@ -67,7 +66,6 @@
                         <i class="fas fa-user-secret"></i> ACCEDIR COM A SIMULAT
                     </button>
                 </div>
-                <p class="text-[9px] text-gray-400 uppercase font-bold tracking-tighter text-center">Permet provar sense bloquejos de Google</p>
             </div>
 
             <p id="login-error-msg" class="text-red-500 text-xs font-bold mt-4 hidden"></p>
@@ -112,7 +110,7 @@
                 <div class="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100">
                     <div id="detail-content"></div>
                     <div class="border-t border-gray-100 pt-8 mt-8">
-                        <h2 class="text-2xl font-black text-gray-800 mb-6">Historial</h2>
+                        <h2 class="text-2xl font-black text-gray-800 mb-6 text-center md:text-left">Historial d'Intervencions</h2>
                         <div id="history-container" class="space-y-4 min-h-[100px]"></div>
                     </div>
                 </div>
@@ -148,9 +146,10 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query, doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // CONFIGURACIÓ FIREBASE I APP ID
         const firebaseConfig = {
             apiKey: "AIzaSyDQhcANb5YLX7AUS0xkA1d2ClOjC42JFo8",
             authDomain: "app-selh.firebaseapp.com",
@@ -160,7 +159,9 @@
             appId: "1:35717844423:web:49611d7a7a7f3be2469de2"
         };
 
-        const appId = 'selh-hospitalet-v2-prod';
+        // ID d'aplicació persistent per garantir que les dades es guarden a la mateixa branca de Firestore
+        const APP_ID = 'selh_hospitalet_main_v1';
+        
         let db, auth, user, userData;
         let allCentres = [], professionals = [], assignacions = [], selectedCentre;
         let intervencionsCounts = {}; 
@@ -191,6 +192,7 @@
                     await preloadDevProfessionals();
                 }
 
+                // Iniciem l'escolta de l'estat d'autenticació
                 onAuthStateChanged(auth, async (u) => {
                     if (u) { 
                         user = u; 
@@ -201,7 +203,8 @@
                     }
                 });
             } catch (e) {
-                showSetupError("Error de connexió inicial.");
+                console.error(e);
+                showSetupError("Error de connexió inicial amb la base de dades.");
             }
         }
 
@@ -213,7 +216,7 @@
                     .sort((a,b) => a.Nom.localeCompare(b.Nom))
                     .map(p => `<option value="${p.Correu}">${p.Nom} (${p.Equip})</option>`).join('');
             } catch (e) {
-                console.warn("No s'ha pogut precarregar la llista de professionals.");
+                console.warn("No s'ha pogut precarregar la llista de professionals per a simulació.");
             }
         }
 
@@ -222,13 +225,15 @@
             if (!selectedEmail) return showToast("Selecciona un usuari");
             
             isSimulation = true;
+            document.getElementById('login-view').classList.add('hidden');
+            document.getElementById('loading-overlay').classList.remove('hidden');
+            
             try {
-                // Autentiquem de forma anònima primer per poder fer consultes a Firestore
                 const cred = await signInAnonymously(auth);
                 user = { 
                     email: selectedEmail, 
                     uid: cred.user.uid, 
-                    displayName: 'Simulació Usuari',
+                    displayName: 'Usuari Simulat',
                     simulatedEmail: selectedEmail 
                 };
                 await loadBaseData();
@@ -256,7 +261,7 @@
         async function loadBaseData() {
             if (!user) return;
             document.getElementById('loading-overlay').classList.remove('hidden');
-            document.getElementById('loading-text').innerText = "Sincronitzant dades...";
+            document.getElementById('loading-text').innerText = "Sincronitzant amb el núvol...";
             
             try {
                 const [c, p, a] = await Promise.all([
@@ -280,10 +285,11 @@
                     setupUI();
                 } else {
                     if (auth.currentUser && !isSimulation) await signOut(auth);
-                    showSetupError(`El compte ${userEmail} no està registrat.`);
+                    showSetupError(`El compte ${userEmail} no està registrat al sistema.`);
                 }
             } catch (e) { 
-                showSetupError("Error en la connexió amb Google Sheets."); 
+                console.error(e);
+                showSetupError("Error en la connexió amb les dades de configuració."); 
             }
         }
 
@@ -291,7 +297,9 @@
             if (globalUnsubscribeIntervencions) globalUnsubscribeIntervencions();
             if (!user) return;
 
-            const q = collection(db, 'artifacts', appId, 'public', 'data', 'intervencions');
+            // RUTA DE FIRESTORE: /artifacts/{appId}/public/data/{collectionName}
+            const q = collection(db, 'artifacts', APP_ID, 'public', 'data', 'intervencions');
+            
             globalUnsubscribeIntervencions = onSnapshot(q, (snap) => {
                 const counts = {};
                 snap.docs.forEach(doc => {
@@ -339,7 +347,7 @@
                 `;
             }).join('');
             
-            if (list.length === 0) container.innerHTML = '<p class="text-center text-gray-400 py-10 font-medium col-span-full">No s\'han trobat centres.</p>';
+            if (list.length === 0) container.innerHTML = '<p class="text-center text-gray-400 py-10 font-medium col-span-full">No s\'han trobat centres o no en tens cap d\'assignat.</p>';
         }
 
         window.openCentre = (id) => {
@@ -362,7 +370,9 @@
             if (currentUnsubscribe) currentUnsubscribe();
             if (!user) return;
 
-            const q = collection(db, 'artifacts', appId, 'public', 'data', 'intervencions');
+            // RUTA DE FIRESTORE: /artifacts/{appId}/public/data/{collectionName}
+            const q = collection(db, 'artifacts', APP_ID, 'public', 'data', 'intervencions');
+            
             currentUnsubscribe = onSnapshot(q, (snap) => {
                 const logs = snap.docs
                     .map(d => ({id: d.id, ...d.data()}))
@@ -378,7 +388,7 @@
         function displayLogs(logs, isError = false) {
             const container = document.getElementById('history-container');
             if (isError) {
-                container.innerHTML = '<p class="text-center text-red-500 py-6 text-xs font-bold">Error carregant historial.</p>';
+                container.innerHTML = '<p class="text-center text-red-500 py-6 text-xs font-bold">Error carregant dades del núvol.</p>';
                 return;
             }
             container.innerHTML = logs.length ? logs.map(l => `
@@ -389,12 +399,12 @@
                     </div>
                     <p class="text-gray-800 whitespace-pre-wrap leading-relaxed">${l.text || ''}</p>
                 </div>
-            `).join('') : '<p class="text-center text-gray-400 py-10 font-medium bg-gray-50 rounded-3xl border border-dashed border-gray-200 italic">Sense visites registrades encara.</p>';
+            `).join('') : '<p class="text-center text-gray-400 py-10 font-medium bg-gray-50 rounded-3xl border border-dashed border-gray-200 italic">Sense intervencions registrades en aquest centre.</p>';
         }
 
         document.getElementById('intervention-form').onsubmit = async (e) => {
             e.preventDefault();
-            if (!user) return showToast("Sessió no vàlida");
+            if (!user) return showToast("No s'ha pogut verificar la teva identitat.");
 
             const btn = document.getElementById('btn-save'); 
             const loader = document.getElementById('save-loader');
@@ -402,14 +412,15 @@
             const textContent = document.getElementById('input-text').value.trim();
             const dateContent = document.getElementById('input-date').value;
             
-            if (!textContent) return showToast("Escriu algun text");
+            if (!textContent) return showToast("Escriu el resum de l'actuació");
 
             btn.disabled = true;
             loader.classList.remove('hidden');
-            textEl.innerText = "Guardant...";
+            textEl.innerText = "Guardant al núvol...";
 
             try {
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'intervencions'), {
+                // GUARDAT PERSISTENT A FIRESTORE
+                await addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'intervencions'), {
                     centreId: selectedCentre.Codi, 
                     centreNom: selectedCentre.Nom, 
                     date: dateContent,
@@ -421,12 +432,12 @@
                 });
                 
                 document.getElementById('input-text').value = "";
-                showToast("Visita guardada!");
+                showToast("Visita guardada correctament!");
                 changeView('detail');
                 
             } catch (err) { 
                 console.error("Error guardant:", err);
-                showToast("Error de permisos o connexió."); 
+                showToast("Error de permisos o connexió en guardar."); 
             } finally { 
                 btn.disabled = false; 
                 loader.classList.add('hidden');
@@ -464,7 +475,8 @@
 
         function showToast(m) {
             const t = document.getElementById('toast'); 
-            document.getElementById('toast-msg').innerText = m;
+            const msgEl = document.getElementById('toast-msg');
+            msgEl.innerText = m;
             t.classList.remove('opacity-0'); 
             setTimeout(() => t.classList.add('opacity-0'), 2500);
         }
