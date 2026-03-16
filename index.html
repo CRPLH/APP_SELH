@@ -55,12 +55,19 @@
                 Entra amb Google
             </button>
 
-            <!-- Botó de simulació -->
-            <div id="dev-actions" class="hidden border-t border-dashed border-gray-200 pt-6">
-                <button id="btn-dev-login" class="w-full bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-black py-4 rounded-2xl transition-colors flex items-center justify-center gap-2">
-                    <i class="fas fa-vial"></i> SIMULAR ACCÉS (MODE PROVES)
-                </button>
-                <p class="text-[9px] text-gray-400 mt-2 uppercase font-bold tracking-tighter text-center">Evita l'error de bloqueig de finestres</p>
+            <!-- Accions de desenvolupador -->
+            <div id="dev-actions" class="hidden border-t border-dashed border-gray-200 pt-6 space-y-4">
+                <p class="text-[10px] text-amber-600 font-black uppercase tracking-widest text-center">Eines de Prova</p>
+                <div class="space-y-2">
+                    <label class="block text-[9px] font-bold text-gray-400 uppercase text-left ml-2">Simular com a:</label>
+                    <select id="dev-user-select" class="w-full p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold outline-none text-amber-900">
+                        <option value="">Carregant professionals...</option>
+                    </select>
+                    <button id="btn-dev-login" class="w-full bg-amber-500 hover:bg-amber-600 text-white text-xs font-black py-4 rounded-2xl transition-colors flex items-center justify-center gap-2 shadow-md">
+                        <i class="fas fa-user-secret"></i> ACCEDIR COM A SIMULAT
+                    </button>
+                </div>
+                <p class="text-[9px] text-gray-400 uppercase font-bold tracking-tighter text-center">Permet provar sense bloquejos de Google</p>
             </div>
 
             <p id="login-error-msg" class="text-red-500 text-xs font-bold mt-4 hidden"></p>
@@ -106,7 +113,7 @@
                     <div id="detail-content"></div>
                     <div class="border-t border-gray-100 pt-8 mt-8">
                         <h2 class="text-2xl font-black text-gray-800 mb-6">Historial</h2>
-                        <div id="history-container" class="space-y-4"></div>
+                        <div id="history-container" class="space-y-4 min-h-[100px]"></div>
                     </div>
                 </div>
             </div>
@@ -156,7 +163,10 @@
         const appId = 'selh-hospitalet-v2-prod';
         let db, auth, user, userData;
         let allCentres = [], professionals = [], assignacions = [], selectedCentre;
+        let intervencionsCounts = {}; // Per guardar el nombre d'intervencions per centre
         let isSimulation = false;
+        let currentUnsubscribe = null;
+        let globalUnsubscribeIntervencions = null;
 
         const isIframe = window.self !== window.top;
         const isDevHost = window.location.hostname.includes('canvas') || 
@@ -165,7 +175,6 @@
                          window.location.hostname === '';
         
         const isDev = isIframe || isDevHost;
-        const DEV_USER_EMAIL = "exemple@xtec.cat"; 
 
         const BASE_PUB_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR5dqDR0ud2GyHQsuD2pArj9Sv33UQJgzpvv0alcml7kdtU5gQ_4d2HpMMDCq0B7px9nc57uCf_XSJ9/pub?output=csv';
         const GIDS = { PROFESSIONALS: '1695749152', CENTRES: '381053055', ASSIGNACIONS: '1470898946' };
@@ -179,6 +188,7 @@
                 if (isDev) {
                     document.getElementById('dev-mode-indicator').classList.remove('hidden');
                     document.getElementById('dev-actions').classList.remove('hidden');
+                    await preloadDevProfessionals();
                 }
 
                 onAuthStateChanged(auth, async (u) => {
@@ -196,9 +206,24 @@
             }
         }
 
+        async function preloadDevProfessionals() {
+            try {
+                professionals = await fetchSheet(GIDS.PROFESSIONALS);
+                const select = document.getElementById('dev-user-select');
+                select.innerHTML = professionals
+                    .sort((a,b) => a.Nom.localeCompare(b.Nom))
+                    .map(p => `<option value="${p.Correu}">${p.Nom} (${p.Equip})</option>`).join('');
+            } catch (e) {
+                console.warn("No s'ha pogut precarregar la llista de professionals.");
+            }
+        }
+
         document.getElementById('btn-dev-login').onclick = async () => {
+            const selectedEmail = document.getElementById('dev-user-select').value;
+            if (!selectedEmail) return showToast("Selecciona un usuari");
+            
             isSimulation = true;
-            user = { email: DEV_USER_EMAIL, uid: 'dev-user-id', displayName: 'Usuari de Prova' };
+            user = { email: selectedEmail, uid: 'dev-user-' + btoa(selectedEmail), displayName: 'Simulació Usuari' };
             await loadBaseData();
         };
 
@@ -213,14 +238,14 @@
                 document.getElementById('loading-overlay').classList.add('hidden');
                 document.getElementById('login-view').classList.remove('hidden');
                 const errEl = document.getElementById('login-error-msg');
-                errEl.innerText = "Fes servir el botó de simulació (groc).";
+                errEl.innerText = "Error d'identificació. Fes servir el mode proves si estàs en un editor.";
                 errEl.classList.remove('hidden');
             }
         };
 
         async function loadBaseData() {
             document.getElementById('loading-overlay').classList.remove('hidden');
-            document.getElementById('loading-text').innerText = "Sincronitzant amb Google Sheets...";
+            document.getElementById('loading-text').innerText = "Sincronitzant dades...";
             
             try {
                 const [c, p, a] = await Promise.all([
@@ -239,15 +264,38 @@
                         role: (found.Rol || 'usuari').toLowerCase(), 
                         assigned: assignacions.filter(a => a.CorreuProfessional?.toLowerCase().trim() === userEmail).map(a => a.CodiCentre) 
                     };
+                    
+                    // Comencem a escoltar el comptador d'intervencions abans de mostrar la UI
+                    listenIntervencionsCounts();
                     setupUI();
                 } else {
                     isSimulation = false;
                     if (auth.currentUser) await signOut(auth);
-                    showSetupError(`El compte ${userEmail} no està a la llista.`);
+                    showSetupError(`El compte ${userEmail} no està registrat a la base de dades.`);
                 }
             } catch (e) { 
-                showSetupError("Error en la lectura de dades."); 
+                showSetupError("Error en la connexió amb Google Sheets."); 
             }
+        }
+
+        // Funció per escoltar totes les intervencions i comptar-les per centre
+        function listenIntervencionsCounts() {
+            if (globalUnsubscribeIntervencions) globalUnsubscribeIntervencions();
+            
+            const q = collection(db, 'artifacts', appId, 'public', 'data', 'intervencions');
+            globalUnsubscribeIntervencions = onSnapshot(q, (snap) => {
+                const counts = {};
+                snap.docs.forEach(doc => {
+                    const data = doc.data();
+                    if (data.centreId) {
+                        counts[data.centreId] = (counts[data.centreId] || 0) + 1;
+                    }
+                });
+                intervencionsCounts = counts;
+                renderCentres(document.getElementById('search-input').value);
+            }, (err) => {
+                console.warn("Firestore count error:", err);
+            });
         }
 
         function setupUI() {
@@ -262,15 +310,27 @@
 
         function renderCentres(filter = "") {
             const container = document.getElementById('centres-container');
+            if (!container) return;
+
             const isSuper = ['admin', 'superusuari'].includes(userData.role);
             const list = allCentres.filter(c => (isSuper || userData.assigned.includes(c.Codi)) && c.Nom.toLowerCase().includes(filter.toLowerCase()));
-            container.innerHTML = list.map(c => `
+            
+            container.innerHTML = list.map(c => {
+                const count = intervencionsCounts[c.Codi] || 0;
+                const countLabel = count === 0 ? 'Sense intervencions' : (count === 1 ? '1 intervenció' : `${count} intervencions`);
+                
+                return `
                 <div onclick="openCentre('${c.Codi}')" class="card-centre bg-white rounded-3xl p-6 cursor-pointer flex items-center justify-between">
-                    <h3 class="font-extrabold text-gray-800">${c.Nom}</h3>
+                    <div>
+                        <h3 class="font-extrabold text-gray-800 leading-tight">${c.Nom}</h3>
+                        <p class="text-[10px] font-bold mt-1 ${count > 0 ? 'text-indigo-500' : 'text-gray-400 italic'} uppercase tracking-wider">${countLabel}</p>
+                    </div>
                     <i class="fas fa-chevron-right text-gray-200"></i>
                 </div>
-            `).join('');
-            if (list.length === 0) container.innerHTML = '<p class="text-center text-gray-400 py-10">Cap centre assignat.</p>';
+                `;
+            }).join('');
+            
+            if (list.length === 0) container.innerHTML = '<p class="text-center text-gray-400 py-10 font-medium col-span-full">No tens cap centre assignat o cap coincideix amb la cerca.</p>';
         }
 
         window.openCentre = (id) => {
@@ -288,22 +348,23 @@
 
         function loadHistory(centreId) {
             const container = document.getElementById('history-container');
-            container.innerHTML = '<div class="flex justify-center py-6"><div class="loader rounded-full border-2 border-t-2 h-6 w-6"></div></div>';
+            container.innerHTML = '<div class="flex justify-center py-10"><div class="loader rounded-full border-2 border-t-2 h-8 w-8"></div></div>';
             
+            if (currentUnsubscribe) currentUnsubscribe();
+
             const q = collection(db, 'artifacts', appId, 'public', 'data', 'intervencions');
-            onSnapshot(q, (snap) => {
+            currentUnsubscribe = onSnapshot(q, (snap) => {
                 const logs = snap.docs.map(d => d.data()).filter(l => l.centreId === centreId).sort((a,b) => b.date.localeCompare(a.date));
                 displayLogs(logs);
             }, (err) => {
-                console.warn("Firestore access error:", err);
                 displayLogs([], true);
             });
         }
 
         function displayLogs(logs, isError = false) {
             const container = document.getElementById('history-container');
-            if (isError && isSimulation) {
-                container.innerHTML = '<p class="text-center text-amber-600 py-6 text-xs font-bold bg-amber-50 rounded-2xl">Connectat en Mode Proves (Sense accés a la DB real)</p>';
+            if (isError) {
+                container.innerHTML = '<p class="text-center text-amber-600 py-6 text-xs font-bold bg-amber-50 rounded-2xl">Connectat en Mode Proves (Sense accés a dades reals)</p>';
                 return;
             }
             container.innerHTML = logs.length ? logs.map(l => `
@@ -314,17 +375,19 @@
                     </div>
                     <p class="text-gray-800 whitespace-pre-wrap leading-relaxed">${l.text}</p>
                 </div>
-            `).join('') : '<p class="text-center text-gray-300 py-6 italic">Sense visites registrades.</p>';
+            `).join('') : '<p class="text-center text-gray-400 py-10 font-medium bg-gray-50 rounded-3xl border border-dashed border-gray-200 italic">Sense visites registrades encara.</p>';
         }
 
         document.getElementById('intervention-form').onsubmit = async (e) => {
             e.preventDefault();
             const btn = document.getElementById('btn-save'); 
             const loader = document.getElementById('save-loader');
-            const text = document.getElementById('save-text');
+            const textEl = document.getElementById('save-text');
+            const textContent = document.getElementById('input-text').value;
+            const dateContent = document.getElementById('input-date').value;
             
             if (isSimulation) {
-                showToast("Simulació: No es guarda a la base de dades.");
+                showToast("Dades no desades (Mode Simulació)");
                 document.getElementById('input-text').value = "";
                 changeView('detail');
                 return;
@@ -332,46 +395,38 @@
 
             btn.disabled = true;
             loader.classList.remove('hidden');
-            text.innerText = "Guardant...";
+            textEl.innerText = "Guardant...";
 
             try {
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'intervencions'), {
                     centreId: selectedCentre.Codi, 
                     centreNom: selectedCentre.Nom, 
-                    date: document.getElementById('input-date').value,
-                    text: document.getElementById('input-text').value, 
+                    date: dateContent,
+                    text: textContent, 
                     userName: userData.nom, 
                     team: userData.equip,
                     userId: user.uid, 
                     createdAt: serverTimestamp()
                 });
                 
-                // Neteja formulari
                 document.getElementById('input-text').value = "";
                 showToast("Visita guardada!");
-                
-                // Forcem el canvi de vista i tornem a carregar l'historial del centre per seguretat
-                loadHistory(selectedCentre.Codi);
                 changeView('detail');
                 
             } catch (e) { 
-                console.error(e);
-                showToast("Error al guardar."); 
+                showToast("Error de connexió al guardar."); 
             } finally { 
                 btn.disabled = false; 
                 loader.classList.add('hidden');
-                text.innerText = "Guardar Visita";
+                textEl.innerText = "Guardar Visita";
             }
         };
 
         window.changeView = (v) => {
             ['list', 'detail', 'form'].forEach(id => {
                 const el = document.getElementById(`view-${id}`);
-                if (id === v) {
-                    el.classList.remove('hidden');
-                } else {
-                    el.classList.add('hidden');
-                }
+                if (id === v) el.classList.remove('hidden');
+                else el.classList.add('hidden');
             });
             window.scrollTo(0,0);
         };
@@ -396,13 +451,17 @@
         }
 
         function showToast(m) {
-            const t = document.getElementById('toast'); document.getElementById('toast-msg').innerText = m;
-            t.classList.remove('opacity-0'); setTimeout(() => t.classList.add('opacity-0'), 2500);
+            const t = document.getElementById('toast'); 
+            document.getElementById('toast-msg').innerText = m;
+            t.classList.remove('opacity-0'); 
+            setTimeout(() => t.classList.add('opacity-0'), 2500);
         }
 
         document.getElementById('search-input').oninput = (e) => renderCentres(e.target.value);
         document.getElementById('btn-logout').onclick = async () => { 
             isSimulation = false;
+            if (currentUnsubscribe) currentUnsubscribe();
+            if (globalUnsubscribeIntervencions) globalUnsubscribeIntervencions();
             if (auth.currentUser) await signOut(auth); 
             location.reload(); 
         };
