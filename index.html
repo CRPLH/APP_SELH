@@ -148,7 +148,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const firebaseConfig = {
@@ -194,7 +194,6 @@
                 onAuthStateChanged(auth, async (u) => {
                     if (u) { 
                         user = u; 
-                        isSimulation = false;
                         await loadBaseData(); 
                     } else if (!isSimulation) {
                         document.getElementById('loading-overlay').classList.add('hidden');
@@ -202,7 +201,7 @@
                     }
                 });
             } catch (e) {
-                showSetupError("Error de connexió.");
+                showSetupError("Error de connexió inicial.");
             }
         }
 
@@ -223,8 +222,19 @@
             if (!selectedEmail) return showToast("Selecciona un usuari");
             
             isSimulation = true;
-            user = { email: selectedEmail, uid: 'dev-user-' + btoa(selectedEmail), displayName: 'Simulació Usuari' };
-            await loadBaseData();
+            try {
+                // Autentiquem de forma anònima primer per poder fer consultes a Firestore
+                const cred = await signInAnonymously(auth);
+                user = { 
+                    email: selectedEmail, 
+                    uid: cred.user.uid, 
+                    displayName: 'Simulació Usuari',
+                    simulatedEmail: selectedEmail 
+                };
+                await loadBaseData();
+            } catch (err) {
+                showToast("Error en la simulació.");
+            }
         };
 
         document.getElementById('btn-login-google').onclick = async () => {
@@ -244,6 +254,7 @@
         };
 
         async function loadBaseData() {
+            if (!user) return;
             document.getElementById('loading-overlay').classList.remove('hidden');
             document.getElementById('loading-text').innerText = "Sincronitzant dades...";
             
@@ -253,7 +264,7 @@
                 ]);
                 allCentres = c; professionals = p; assignacions = a;
                 
-                const userEmail = user.email?.toLowerCase().trim();
+                const userEmail = (user.simulatedEmail || user.email || "").toLowerCase().trim();
                 const found = professionals.find(p => p.Correu?.toLowerCase().trim() === userEmail);
                 
                 if (found) {
@@ -268,9 +279,8 @@
                     listenIntervencionsCounts();
                     setupUI();
                 } else {
-                    isSimulation = false;
-                    if (auth.currentUser) await signOut(auth);
-                    showSetupError(`El compte ${userEmail} no està registrat a la base de dades.`);
+                    if (auth.currentUser && !isSimulation) await signOut(auth);
+                    showSetupError(`El compte ${userEmail} no està registrat.`);
                 }
             } catch (e) { 
                 showSetupError("Error en la connexió amb Google Sheets."); 
@@ -279,7 +289,8 @@
 
         function listenIntervencionsCounts() {
             if (globalUnsubscribeIntervencions) globalUnsubscribeIntervencions();
-            
+            if (!user) return;
+
             const q = collection(db, 'artifacts', appId, 'public', 'data', 'intervencions');
             globalUnsubscribeIntervencions = onSnapshot(q, (snap) => {
                 const counts = {};
@@ -292,7 +303,7 @@
                 intervencionsCounts = counts;
                 renderCentres(document.getElementById('search-input').value);
             }, (err) => {
-                console.warn("Firestore count error:", err);
+                console.warn("Firestore error:", err);
             });
         }
 
@@ -328,7 +339,7 @@
                 `;
             }).join('');
             
-            if (list.length === 0) container.innerHTML = '<p class="text-center text-gray-400 py-10 font-medium col-span-full">No tens cap centre assignat o cap coincideix amb la cerca.</p>';
+            if (list.length === 0) container.innerHTML = '<p class="text-center text-gray-400 py-10 font-medium col-span-full">No s\'han trobat centres.</p>';
         }
 
         window.openCentre = (id) => {
@@ -349,12 +360,17 @@
             container.innerHTML = '<div id="history-loader" class="flex justify-center py-10"><div class="loader rounded-full border-2 border-t-2 h-8 w-8"></div></div>';
             
             if (currentUnsubscribe) currentUnsubscribe();
+            if (!user) return;
 
             const q = collection(db, 'artifacts', appId, 'public', 'data', 'intervencions');
             currentUnsubscribe = onSnapshot(q, (snap) => {
-                const logs = snap.docs.map(d => d.data()).filter(l => l.centreId === centreId).sort((a,b) => b.date.localeCompare(a.date));
+                const logs = snap.docs
+                    .map(d => ({id: d.id, ...d.data()}))
+                    .filter(l => l.centreId === centreId)
+                    .sort((a,b) => (b.date || "").localeCompare(a.date || ""));
                 displayLogs(logs);
             }, (err) => {
+                console.error("Error historial:", err);
                 displayLogs([], true);
             });
         }
@@ -362,34 +378,31 @@
         function displayLogs(logs, isError = false) {
             const container = document.getElementById('history-container');
             if (isError) {
-                container.innerHTML = '<p class="text-center text-amber-600 py-6 text-xs font-bold bg-amber-50 rounded-2xl">Connectat en Mode Proves (Sense accés a dades reals)</p>';
+                container.innerHTML = '<p class="text-center text-red-500 py-6 text-xs font-bold">Error carregant historial.</p>';
                 return;
             }
             container.innerHTML = logs.length ? logs.map(l => `
-                <div class="bg-gray-50 p-6 rounded-3xl border-l-4 team-${l.team.toLowerCase()} slide-up mb-4">
+                <div class="bg-gray-50 p-6 rounded-3xl border-l-4 team-${(l.team || 'eap').toLowerCase()} slide-up mb-4">
                     <div class="flex justify-between text-[10px] font-bold text-gray-400 mb-2">
-                        <span>${l.date}</span>
-                        <span>${l.userName}</span>
+                        <span>${l.date || 'Sense data'}</span>
+                        <span>${l.userName || 'Anònim'}</span>
                     </div>
-                    <p class="text-gray-800 whitespace-pre-wrap leading-relaxed">${l.text}</p>
+                    <p class="text-gray-800 whitespace-pre-wrap leading-relaxed">${l.text || ''}</p>
                 </div>
             `).join('') : '<p class="text-center text-gray-400 py-10 font-medium bg-gray-50 rounded-3xl border border-dashed border-gray-200 italic">Sense visites registrades encara.</p>';
         }
 
         document.getElementById('intervention-form').onsubmit = async (e) => {
             e.preventDefault();
+            if (!user) return showToast("Sessió no vàlida");
+
             const btn = document.getElementById('btn-save'); 
             const loader = document.getElementById('save-loader');
             const textEl = document.getElementById('save-text');
-            const textContent = document.getElementById('input-text').value;
+            const textContent = document.getElementById('input-text').value.trim();
             const dateContent = document.getElementById('input-date').value;
             
-            if (isSimulation) {
-                showToast("Dades no desades (Mode Simulació)");
-                document.getElementById('input-text').value = "";
-                changeView('detail');
-                return;
-            }
+            if (!textContent) return showToast("Escriu algun text");
 
             btn.disabled = true;
             loader.classList.remove('hidden');
@@ -409,11 +422,11 @@
                 
                 document.getElementById('input-text').value = "";
                 showToast("Visita guardada!");
-                // Corregit: Redirigim a la vista de detall immediatament després d'èxit
                 changeView('detail');
                 
-            } catch (e) { 
-                showToast("Error de connexió al guardar."); 
+            } catch (err) { 
+                console.error("Error guardant:", err);
+                showToast("Error de permisos o connexió."); 
             } finally { 
                 btn.disabled = false; 
                 loader.classList.add('hidden');
@@ -458,7 +471,6 @@
 
         document.getElementById('search-input').oninput = (e) => renderCentres(e.target.value);
         document.getElementById('btn-logout').onclick = async () => { 
-            isSimulation = false;
             if (currentUnsubscribe) currentUnsubscribe();
             if (globalUnsubscribeIntervencions) globalUnsubscribeIntervencions();
             if (auth.currentUser) await signOut(auth); 
