@@ -149,7 +149,6 @@
         import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query, doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // CONFIGURACIÓ FIREBASE I APP ID
         const firebaseConfig = {
             apiKey: "AIzaSyDQhcANb5YLX7AUS0xkA1d2ClOjC42JFo8",
             authDomain: "app-selh.firebaseapp.com",
@@ -159,22 +158,16 @@
             appId: "1:35717844423:web:49611d7a7a7f3be2469de2"
         };
 
-        // ID d'aplicació persistent per garantir que les dades es guarden a la mateixa branca de Firestore
         const APP_ID = 'selh_hospitalet_main_v1';
         
         let db, auth, user, userData;
         let allCentres = [], professionals = [], assignacions = [], selectedCentre;
         let intervencionsCounts = {}; 
-        let isSimulation = false;
         let currentUnsubscribe = null;
         let globalUnsubscribeIntervencions = null;
 
         const isIframe = window.self !== window.top;
-        const isDevHost = window.location.hostname.includes('canvas') || 
-                         window.location.hostname.includes('artifact') || 
-                         window.location.hostname === 'localhost' ||
-                         window.location.hostname === '';
-        
+        const isDevHost = window.location.hostname.includes('canvas') || window.location.hostname.includes('artifact') || window.location.hostname === '';
         const isDev = isIframe || isDevHost;
 
         const BASE_PUB_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR5dqDR0ud2GyHQsuD2pArj9Sv33UQJgzpvv0alcml7kdtU5gQ_4d2HpMMDCq0B7px9nc57uCf_XSJ9/pub?output=csv';
@@ -186,25 +179,39 @@
                 auth = getAuth(app);
                 db = getFirestore(app);
 
+                // PROTOCOL OBLIGATORI: Autenticació asíncrona abans de res
+                const performAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (e) {
+                        console.error("Auth priority failed:", e);
+                    }
+                };
+
+                await performAuth();
+
                 if (isDev) {
                     document.getElementById('dev-mode-indicator').classList.remove('hidden');
                     document.getElementById('dev-actions').classList.remove('hidden');
                     await preloadDevProfessionals();
                 }
 
-                // Iniciem l'escolta de l'estat d'autenticació
                 onAuthStateChanged(auth, async (u) => {
                     if (u) { 
                         user = u; 
                         await loadBaseData(); 
-                    } else if (!isSimulation) {
+                    } else {
                         document.getElementById('loading-overlay').classList.add('hidden');
                         document.getElementById('login-view').classList.remove('hidden');
                     }
                 });
             } catch (e) {
                 console.error(e);
-                showSetupError("Error de connexió inicial amb la base de dades.");
+                showSetupError("Error en la connexió inicial amb Firebase.");
             }
         }
 
@@ -212,34 +219,24 @@
             try {
                 professionals = await fetchSheet(GIDS.PROFESSIONALS);
                 const select = document.getElementById('dev-user-select');
-                select.innerHTML = professionals
-                    .sort((a,b) => a.Nom.localeCompare(b.Nom))
-                    .map(p => `<option value="${p.Correu}">${p.Nom} (${p.Equip})</option>`).join('');
-            } catch (e) {
-                console.warn("No s'ha pogut precarregar la llista de professionals per a simulació.");
-            }
+                if (select) {
+                    select.innerHTML = professionals
+                        .sort((a,b) => a.Nom.localeCompare(b.Nom))
+                        .map(p => `<option value="${p.Correu}">${p.Nom} (${p.Equip})</option>`).join('');
+                }
+            } catch (e) { console.warn("Dev preload failed"); }
         }
 
         document.getElementById('btn-dev-login').onclick = async () => {
             const selectedEmail = document.getElementById('dev-user-select').value;
             if (!selectedEmail) return showToast("Selecciona un usuari");
             
-            isSimulation = true;
             document.getElementById('login-view').classList.add('hidden');
             document.getElementById('loading-overlay').classList.remove('hidden');
             
-            try {
-                const cred = await signInAnonymously(auth);
-                user = { 
-                    email: selectedEmail, 
-                    uid: cred.user.uid, 
-                    displayName: 'Usuari Simulat',
-                    simulatedEmail: selectedEmail 
-                };
-                await loadBaseData();
-            } catch (err) {
-                showToast("Error en la simulació.");
-            }
+            // Simulem dades d'usuari directament sobre l'auth existent
+            user.simulatedEmail = selectedEmail;
+            await loadBaseData();
         };
 
         document.getElementById('btn-login-google').onclick = async () => {
@@ -252,16 +249,13 @@
             } catch (err) {
                 document.getElementById('loading-overlay').classList.add('hidden');
                 document.getElementById('login-view').classList.remove('hidden');
-                const errEl = document.getElementById('login-error-msg');
-                errEl.innerText = "Error d'identificació. Fes servir el mode proves si estàs en un editor.";
-                errEl.classList.remove('hidden');
+                showToast("Error en l'accés Google.");
             }
         };
 
         async function loadBaseData() {
             if (!user) return;
             document.getElementById('loading-overlay').classList.remove('hidden');
-            document.getElementById('loading-text').innerText = "Sincronitzant amb el núvol...";
             
             try {
                 const [c, p, a] = await Promise.all([
@@ -284,12 +278,10 @@
                     listenIntervencionsCounts();
                     setupUI();
                 } else {
-                    if (auth.currentUser && !isSimulation) await signOut(auth);
-                    showSetupError(`El compte ${userEmail} no està registrat al sistema.`);
+                    showSetupError(`El compte ${userEmail} no té permisos asignats.`);
                 }
             } catch (e) { 
-                console.error(e);
-                showSetupError("Error en la connexió amb les dades de configuració."); 
+                showSetupError("Error carregant les dades dels fulls de Google."); 
             }
         }
 
@@ -297,22 +289,18 @@
             if (globalUnsubscribeIntervencions) globalUnsubscribeIntervencions();
             if (!user) return;
 
-            // RUTA DE FIRESTORE: /artifacts/{appId}/public/data/{collectionName}
+            // RUTA ESTRICTA FIRESTORE
             const q = collection(db, 'artifacts', APP_ID, 'public', 'data', 'intervencions');
             
             globalUnsubscribeIntervencions = onSnapshot(q, (snap) => {
                 const counts = {};
                 snap.docs.forEach(doc => {
                     const data = doc.data();
-                    if (data.centreId) {
-                        counts[data.centreId] = (counts[data.centreId] || 0) + 1;
-                    }
+                    if (data.centreId) counts[data.centreId] = (counts[data.centreId] || 0) + 1;
                 });
                 intervencionsCounts = counts;
                 renderCentres(document.getElementById('search-input').value);
-            }, (err) => {
-                console.warn("Firestore error:", err);
-            });
+            }, (err) => console.error("Snapshot error:", err));
         }
 
         function setupUI() {
@@ -334,28 +322,25 @@
             
             container.innerHTML = list.map(c => {
                 const count = intervencionsCounts[c.Codi] || 0;
-                const countLabel = count === 0 ? 'Sense intervencions' : (count === 1 ? '1 intervenció' : `${count} intervencions`);
-                
                 return `
                 <div onclick="openCentre('${c.Codi}')" class="card-centre bg-white rounded-3xl p-6 cursor-pointer flex items-center justify-between">
                     <div>
                         <h3 class="font-extrabold text-gray-800 leading-tight">${c.Nom}</h3>
-                        <p class="text-[10px] font-bold mt-1 ${count > 0 ? 'text-indigo-500' : 'text-gray-400 italic'} uppercase tracking-wider">${countLabel}</p>
+                        <p class="text-[10px] font-bold mt-1 ${count > 0 ? 'text-indigo-500' : 'text-gray-400 italic'} uppercase tracking-wider">
+                            ${count === 0 ? 'Sense visites' : (count === 1 ? '1 visita' : `${count} visites`)}
+                        </p>
                     </div>
                     <i class="fas fa-chevron-right text-gray-200"></i>
-                </div>
-                `;
+                </div>`;
             }).join('');
-            
-            if (list.length === 0) container.innerHTML = '<p class="text-center text-gray-400 py-10 font-medium col-span-full">No s\'han trobat centres o no en tens cap d\'assignat.</p>';
         }
 
         window.openCentre = (id) => {
             selectedCentre = allCentres.find(c => c.Codi === id);
             document.getElementById('detail-content').innerHTML = `
                 <h1 class="text-3xl font-black text-gray-900 mb-6">${selectedCentre.Nom}</h1>
-                <button onclick="changeView('form')" class="bg-indigo-600 text-white font-bold py-4 px-8 rounded-2xl w-full md:w-auto mb-6 shadow-lg hover:bg-indigo-700 transition-colors">
-                    <i class="fas fa-plus mr-2"></i>Nova Intervenció
+                <button onclick="changeView('form')" class="bg-indigo-600 text-white font-bold py-4 px-8 rounded-2xl w-full md:w-auto mb-6 shadow-lg hover:bg-indigo-700">
+                    <i class="fas fa-plus mr-2"></i>Nova Visita
                 </button>`;
             document.getElementById('form-nom-display').innerText = selectedCentre.Nom;
             document.getElementById('input-date').valueAsDate = new Date();
@@ -365,12 +350,9 @@
 
         function loadHistory(centreId) {
             const container = document.getElementById('history-container');
-            container.innerHTML = '<div id="history-loader" class="flex justify-center py-10"><div class="loader rounded-full border-2 border-t-2 h-8 w-8"></div></div>';
+            container.innerHTML = '<div class="flex justify-center py-10"><div class="loader rounded-full border-2 border-t-2 h-8 w-8"></div></div>';
             
             if (currentUnsubscribe) currentUnsubscribe();
-            if (!user) return;
-
-            // RUTA DE FIRESTORE: /artifacts/{appId}/public/data/{collectionName}
             const q = collection(db, 'artifacts', APP_ID, 'public', 'data', 'intervencions');
             
             currentUnsubscribe = onSnapshot(q, (snap) => {
@@ -378,48 +360,35 @@
                     .map(d => ({id: d.id, ...d.data()}))
                     .filter(l => l.centreId === centreId)
                     .sort((a,b) => (b.date || "").localeCompare(a.date || ""));
-                displayLogs(logs);
-            }, (err) => {
-                console.error("Error historial:", err);
-                displayLogs([], true);
-            });
-        }
-
-        function displayLogs(logs, isError = false) {
-            const container = document.getElementById('history-container');
-            if (isError) {
-                container.innerHTML = '<p class="text-center text-red-500 py-6 text-xs font-bold">Error carregant dades del núvol.</p>';
-                return;
-            }
-            container.innerHTML = logs.length ? logs.map(l => `
-                <div class="bg-gray-50 p-6 rounded-3xl border-l-4 team-${(l.team || 'eap').toLowerCase()} slide-up mb-4">
-                    <div class="flex justify-between text-[10px] font-bold text-gray-400 mb-2">
-                        <span>${l.date || 'Sense data'}</span>
-                        <span>${l.userName || 'Anònim'}</span>
+                
+                container.innerHTML = logs.length ? logs.map(l => `
+                    <div class="bg-gray-50 p-6 rounded-3xl border-l-4 team-${(l.team || 'eap').toLowerCase()} slide-up mb-4">
+                        <div class="flex justify-between text-[10px] font-bold text-gray-400 mb-2">
+                            <span>${l.date}</span>
+                            <span>${l.userName}</span>
+                        </div>
+                        <p class="text-gray-800 whitespace-pre-wrap leading-relaxed">${l.text}</p>
                     </div>
-                    <p class="text-gray-800 whitespace-pre-wrap leading-relaxed">${l.text || ''}</p>
-                </div>
-            `).join('') : '<p class="text-center text-gray-400 py-10 font-medium bg-gray-50 rounded-3xl border border-dashed border-gray-200 italic">Sense intervencions registrades en aquest centre.</p>';
+                `).join('') : '<p class="text-center text-gray-400 py-10 italic">Cap registre encara.</p>';
+            }, (err) => console.error("History error:", err));
         }
 
         document.getElementById('intervention-form').onsubmit = async (e) => {
             e.preventDefault();
-            if (!user) return showToast("No s'ha pogut verificar la teva identitat.");
+            if (!user) return showToast("Identitat no verificada.");
 
             const btn = document.getElementById('btn-save'); 
             const loader = document.getElementById('save-loader');
             const textEl = document.getElementById('save-text');
             const textContent = document.getElementById('input-text').value.trim();
             const dateContent = document.getElementById('input-date').value;
-            
-            if (!textContent) return showToast("Escriu el resum de l'actuació");
 
             btn.disabled = true;
             loader.classList.remove('hidden');
-            textEl.innerText = "Guardant al núvol...";
+            textEl.innerText = "Guardant...";
 
             try {
-                // GUARDAT PERSISTENT A FIRESTORE
+                // GUARDAT PERSISTENT FIRESTORE
                 await addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'intervencions'), {
                     centreId: selectedCentre.Codi, 
                     centreNom: selectedCentre.Nom, 
@@ -432,12 +401,11 @@
                 });
                 
                 document.getElementById('input-text').value = "";
-                showToast("Visita guardada correctament!");
+                showToast("Visita guardada!");
                 changeView('detail');
-                
             } catch (err) { 
-                console.error("Error guardant:", err);
-                showToast("Error de permisos o connexió en guardar."); 
+                console.error("Save error:", err);
+                showToast("Error de permisos."); 
             } finally { 
                 btn.disabled = false; 
                 loader.classList.add('hidden');
@@ -446,11 +414,7 @@
         };
 
         window.changeView = (v) => {
-            ['list', 'detail', 'form'].forEach(id => {
-                const el = document.getElementById(`view-${id}`);
-                if (id === v) el.classList.remove('hidden');
-                else el.classList.add('hidden');
-            });
+            ['list', 'detail', 'form'].forEach(id => document.getElementById(`view-${id}`).classList.toggle('hidden', id !== v));
             window.scrollTo(0,0);
         };
 
@@ -475,16 +439,13 @@
 
         function showToast(m) {
             const t = document.getElementById('toast'); 
-            const msgEl = document.getElementById('toast-msg');
-            msgEl.innerText = m;
+            document.getElementById('toast-msg').innerText = m;
             t.classList.remove('opacity-0'); 
             setTimeout(() => t.classList.add('opacity-0'), 2500);
         }
 
         document.getElementById('search-input').oninput = (e) => renderCentres(e.target.value);
         document.getElementById('btn-logout').onclick = async () => { 
-            if (currentUnsubscribe) currentUnsubscribe();
-            if (globalUnsubscribeIntervencions) globalUnsubscribeIntervencions();
             if (auth.currentUser) await signOut(auth); 
             location.reload(); 
         };
