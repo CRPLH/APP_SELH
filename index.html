@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SE LH - Gestió de Centres</title>
+    <title>SE LH - Gestió de Centrsfsadfsadfsfs</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -48,7 +48,7 @@
                 <i class="fas fa-user-shield text-white text-3xl"></i>
             </div>
             <h1 class="text-3xl font-black text-gray-800 mb-2">SE L'Hospitalet</h1>
-            <p class="text-gray-500 mb-10 text-sm italic">Accés restringit a personal de l'EAP, CRP i ELIC</p>
+            <p class="text-gray-500 mb-10 text-sm italic">Accés restringit sdfsdfsfsf, CRP i ELIC</p>
             
             <button id="btn-login-google" class="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-bold py-4 rounded-2xl transition-all shadow-sm active:scale-95 mb-6">
                 <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-6 h-6" alt="Google">
@@ -151,9 +151,8 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Configuració oficial de Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyDQhcANb5YLX7AUS0xkA1d2ClOjC42JFo8",
             authDomain: "app-selh.firebaseapp.com",
@@ -163,7 +162,7 @@
             appId: "1:35717844423:web:49611d7a7a7f3be2469de2"
         };
 
-        const APP_ID = 'selh_hospitalet_main_v2'; // Versió 2 amb més robustesa
+        const APP_ID = 'selh_hospitalet_main_v3'; // Versió 3: Màxima robustesa de dades
         
         let db, auth, user, userData;
         let allCentres = [], professionals = [], assignacions = [], selectedCentre;
@@ -173,30 +172,18 @@
 
         const isDev = window.location.hostname.includes('canvas') || window.location.hostname.includes('artifact') || window.location.hostname === '';
 
-        // URL del Google Sheet Publicat com a CSV
         const BASE_PUB_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR5dqDR0ud2GyHQsuD2pArj9Sv33UQJgzpvv0alcml7kdtU5gQ_4d2HpMMDCq0B7px9nc57uCf_XSJ9/pub?output=csv';
         const GIDS = { PROFESSIONALS: '1695749152', CENTRES: '381053055', ASSIGNACIONS: '1470898946' };
 
+        // Inicialització asíncrona robusta
         async function init() {
             try {
                 const app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
 
-                // Protocol d'autenticació asíncrona prioritari
-                const authenticate = async () => {
-                    try {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await signInWithCustomToken(auth, __initial_auth_token);
-                        } else {
-                            await signInAnonymously(auth);
-                        }
-                    } catch (e) {
-                        console.warn("Auth silent fallback:", e);
-                    }
-                };
-
-                await authenticate();
+                // Esperar a l'autenticació abans de res
+                await performAuth();
 
                 if (isDev) {
                     document.getElementById('dev-mode-indicator').classList.remove('hidden');
@@ -206,6 +193,7 @@
                 onAuthStateChanged(auth, async (u) => {
                     if (u) { 
                         user = u; 
+                        console.log("Usuari autenticat:", u.uid);
                         await loadData(); 
                     } else {
                         hideLoader();
@@ -213,13 +201,25 @@
                     }
                 });
             } catch (e) {
-                console.error("Init Error:", e);
-                showSetupError("Error en connectar amb el servidor.");
+                console.error("Critical Init Error:", e);
+                showSetupError("Error de connexió crítica amb Firebase.");
+            }
+        }
+
+        async function performAuth() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (e) {
+                console.warn("Auth fallback activat:", e);
             }
         }
 
         async function loadData() {
-            showLoader("Carregant dades del SE...");
+            showLoader("Sincronitzant dades...");
             try {
                 const [c, p, a] = await Promise.all([
                     fetchSheet(GIDS.CENTRES), fetchSheet(GIDS.PROFESSIONALS), fetchSheet(GIDS.ASSIGNACIONS)
@@ -228,38 +228,27 @@
                 allCentres = c; professionals = p; assignacions = a;
                 updateDevSelect(p);
 
-                // Determinar usuari actual
                 const emailToFind = (user.simulatedEmail || user.email || "").toLowerCase().trim();
-                const professional = professionals.find(prof => prof.Correu?.toLowerCase().trim() === emailToFind);
+                const prof = professionals.find(pr => pr.Correu?.toLowerCase().trim() === emailToFind);
 
-                if (professional) {
+                if (prof) {
                     userData = {
-                        nom: professional.Nom,
+                        nom: prof.Nom,
                         email: emailToFind,
-                        equip: (professional.Equip || 'EAP').toLowerCase(),
-                        role: (professional.Rol || 'usuari').toLowerCase(),
+                        equip: (prof.Equip || 'EAP').toLowerCase(),
+                        role: (prof.Rol || 'usuari').toLowerCase(),
                         assigned: assignacions.filter(asig => asig.CorreuProfessional?.toLowerCase().trim() === emailToFind).map(asig => asig.CodiCentre)
                     };
                     setupApp();
                 } else if (isDev && !user.simulatedEmail) {
-                    // Si és entorn dev i no hi ha email, mostrem login perquè triïn
                     hideLoader();
                     document.getElementById('login-view').classList.remove('hidden');
                 } else {
-                    showSetupError(`L'usuari ${emailToFind} no està registrat al sistema.`);
+                    showSetupError(`Accés denegat: ${emailToFind} no està autoritzat.`);
                 }
             } catch (e) {
-                console.error("LoadData Error:", e);
-                showSetupError("No s'ha pogut accedir als fulls de Google. Verifica els permisos de publicació.");
-            }
-        }
-
-        function updateDevSelect(profs) {
-            const select = document.getElementById('dev-user-select');
-            if (select) {
-                select.innerHTML = '<option value="">Tria un professional...</option>' + 
-                    profs.sort((a,b) => a.Nom.localeCompare(b.Nom))
-                         .map(p => `<option value="${p.Correu}">${p.Nom} (${p.Equip})</option>`).join('');
+                console.error("Data Load Error:", e);
+                showSetupError("Error en llegir dades del Google Sheet. Revisa la publicació.");
             }
         }
 
@@ -278,6 +267,7 @@
 
         function listenIntervencionsCounts() {
             if (globalUnsubscribeIntervencions) globalUnsubscribeIntervencions();
+            // RULE 1 & 2: Col·lecció pública, sense filtres complexos
             const q = collection(db, 'artifacts', APP_ID, 'public', 'data', 'intervencions');
             
             globalUnsubscribeIntervencions = onSnapshot(q, (snap) => {
@@ -288,7 +278,7 @@
                 });
                 intervencionsCounts = counts;
                 renderCentres(document.getElementById('search-input').value);
-            }, (err) => console.error("Counts error:", err));
+            }, (err) => console.error("Snapshot Error:", err));
         }
 
         function renderCentres(filter = "") {
@@ -297,28 +287,24 @@
 
             const isSuper = ['admin', 'superusuari'].includes(userData.role);
             const filtered = allCentres.filter(c => {
-                const matchesFilter = c.Nom.toLowerCase().includes(filter.toLowerCase()) || c.Codi.includes(filter);
+                const matches = c.Nom.toLowerCase().includes(filter.toLowerCase()) || c.Codi.includes(filter);
                 const isAssigned = userData.assigned.includes(c.Codi);
-                return (isSuper || isAssigned) && matchesFilter;
+                return (isSuper || isAssigned) && matches;
             });
 
             container.innerHTML = filtered.map(c => {
                 const count = intervencionsCounts[c.Codi] || 0;
                 return `
-                <div onclick="openCentre('${c.Codi}')" class="card-centre bg-white rounded-3xl p-6 cursor-pointer flex items-center justify-between border border-gray-100 shadow-sm">
+                <div onclick="openCentre('${c.Codi}')" class="card-centre bg-white rounded-3xl p-6 cursor-pointer flex items-center justify-between shadow-sm">
                     <div>
                         <h3 class="font-extrabold text-gray-800 leading-tight">${c.Nom}</h3>
                         <p class="text-[10px] font-bold mt-1 ${count > 0 ? 'text-indigo-500' : 'text-gray-400 italic'} uppercase">
-                            ${count === 0 ? 'Sense visites registrades' : (count === 1 ? '1 visita' : `${count} visites`)}
+                            ${count === 0 ? 'Sense visites' : (count === 1 ? '1 visita' : `${count} visites`)}
                         </p>
                     </div>
                     <i class="fas fa-chevron-right text-indigo-100"></i>
                 </div>`;
             }).join('');
-
-            if (!filtered.length && allCentres.length) {
-                container.innerHTML = `<div class="col-span-full py-10 text-center text-gray-400 italic">No tens centres assignats o no coincideixen amb la cerca.</div>`;
-            }
         }
 
         window.openCentre = (id) => {
@@ -348,36 +334,42 @@
             const q = collection(db, 'artifacts', APP_ID, 'public', 'data', 'intervencions');
             
             currentUnsubscribe = onSnapshot(q, (snap) => {
+                // RULE 2: Filtrar i ordenar en memòria
                 const logs = snap.docs
                     .map(d => ({id: d.id, ...d.data()}))
                     .filter(l => l.centreId === centreId)
                     .sort((a,b) => (b.date || "").localeCompare(a.date || ""));
                 
                 container.innerHTML = logs.length ? logs.map(l => `
-                    <div class="bg-gray-50 p-6 rounded-3xl border-l-4 team-${(l.team || 'eap').toLowerCase()} slide-up mb-4 hover:bg-gray-100 transition-colors">
+                    <div class="bg-gray-50 p-6 rounded-3xl border-l-4 team-${(l.team || 'eap').toLowerCase()} slide-up mb-4">
                         <div class="flex justify-between items-center mb-3">
                             <span class="text-[10px] font-black text-indigo-900 bg-white px-3 py-1 rounded-full border border-indigo-50">${l.date}</span>
                             <span class="text-[10px] font-bold text-gray-400 uppercase">${l.userName}</span>
                         </div>
                         <p class="text-gray-700 whitespace-pre-wrap leading-relaxed text-sm font-medium">${l.text}</p>
                     </div>
-                `).join('') : '<p class="text-center text-gray-300 py-10 italic text-sm">Encara no s\'ha registrat cap actuació en aquest centre.</p>';
+                `).join('') : '<p class="text-center text-gray-300 py-10 italic text-sm">No hi ha visites registrades.</p>';
             }, (err) => {
-                container.innerHTML = `<p class="text-red-500 text-center py-10">Error carregant historial.</p>`;
+                container.innerHTML = `<p class="text-red-500 text-center py-10 text-xs font-bold">Error de sincronització.</p>`;
             });
         }
 
         document.getElementById('intervention-form').onsubmit = async (e) => {
             e.preventDefault();
-            const btn = document.getElementById('btn-save');
             const txt = document.getElementById('input-text').value.trim();
             const dat = document.getElementById('input-date').value;
 
-            if (!txt) return;
+            if (!txt || !user) {
+                showToast("S'ha perdut la sessió o el text és buit.");
+                return;
+            }
 
             setSaving(true);
             try {
-                await addDoc(collection(db, 'artifacts', APP_ID, 'public', 'data', 'intervencions'), {
+                // RULE 1: Path estricte /artifacts/{appId}/public/data/{coll}
+                const collRef = collection(db, 'artifacts', APP_ID, 'public', 'data', 'intervencions');
+                
+                await addDoc(collRef, {
                     centreId: selectedCentre.Codi,
                     centreNom: selectedCentre.Nom,
                     date: dat,
@@ -389,28 +381,26 @@
                 });
                 
                 document.getElementById('input-text').value = "";
-                showToast("Visita registrada correctament!");
+                showToast("Visita desada amb èxit!");
                 changeView('detail');
             } catch (err) {
-                console.error("Save Error:", err);
-                showToast("Error de permisos en guardar.");
+                console.error("Firestore Save Error:", err);
+                showToast("Error de permisos. No s'han pogut desar les dades.");
             } finally {
                 setSaving(false);
             }
         };
 
-        // Helpers
+        // Helpers i utilitats
         async function fetchSheet(gid) {
-            try {
-                const response = await fetch(`${BASE_PUB_URL}&gid=${gid}&t=${Date.now()}`);
-                const csvText = await response.text();
-                const lines = csvText.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
-                const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
-                return lines.slice(1).map(line => {
-                    const values = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.trim().replace(/^"|"$/g, ''));
-                    return headers.reduce((obj, h, i) => (obj[h] = values[i] || "", obj), {});
-                });
-            } catch (e) { throw e; }
+            const response = await fetch(`${BASE_PUB_URL}&gid=${gid}&cache=${Math.random()}`);
+            const text = await response.text();
+            const rows = text.replace(/^\uFEFF/, '').trim().split(/\n/);
+            const headers = rows[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+            return rows.slice(1).map(row => {
+                const cells = row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.trim().replace(/^"|"$/g, ''));
+                return headers.reduce((acc, h, i) => (acc[h] = cells[i] || "", acc), {});
+            });
         }
 
         function showLoader(txt) {
@@ -434,7 +424,7 @@
         function setSaving(isSaving) {
             const btn = document.getElementById('btn-save');
             document.getElementById('save-loader').classList.toggle('hidden', !isSaving);
-            document.getElementById('save-text').innerText = isSaving ? "Guardant..." : "Guardar registre";
+            document.getElementById('save-text').innerText = isSaving ? "Enviant..." : "Guardar registre";
             btn.disabled = isSaving;
         }
 
@@ -447,21 +437,29 @@
             const t = document.getElementById('toast'); 
             document.getElementById('toast-msg').innerText = m;
             t.classList.replace('opacity-0', 'opacity-100'); 
-            setTimeout(() => t.classList.replace('opacity-100', 'opacity-0'), 3000);
+            setTimeout(() => t.classList.replace('opacity-100', 'opacity-0'), 4000);
         }
 
-        // Events
+        function updateDevSelect(profs) {
+            const select = document.getElementById('dev-user-select');
+            if (select) {
+                select.innerHTML = '<option value="">Professional...</option>' + 
+                    profs.sort((a,b) => a.Nom.localeCompare(b.Nom))
+                         .map(p => `<option value="${p.Correu}">${p.Nom} (${p.Equip})</option>`).join('');
+            }
+        }
+
         document.getElementById('search-input').oninput = (e) => renderCentres(e.target.value);
         document.getElementById('btn-logout').onclick = async () => { await signOut(auth); location.reload(); };
         document.getElementById('btn-login-google').onclick = async () => {
             const provider = new GoogleAuthProvider();
             provider.setCustomParameters({ hd: 'xtec.cat' });
             try {
-                showLoader("Connectant amb Google...");
+                showLoader("Identificant...");
                 await signInWithPopup(auth, provider);
             } catch (e) {
                 hideLoader();
-                showToast("L'inici de sessió ha fallat.");
+                showToast("S'ha cancel·lat el login.");
             }
         };
         document.getElementById('btn-dev-login').onclick = async () => {
